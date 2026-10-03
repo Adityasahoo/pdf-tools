@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Merge PDF</title>
+  <style>
+    :root {
+      --bg: #eef3f4;
+      --ink: #14272b;
+      --accent: #0f5c63;
+      --line: #c5d3d6;
+      --danger: #b3261e;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+
+    main {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin: 0 0 4px;
+    }
+
+    p.sub {
+      margin: 0 0 24px;
+      color: #4a6065;
+    }
+
+    #drop {
+      display: block;
+      border: 2px dashed var(--accent);
+      border-radius: 12px;
+      padding: 36px 16px;
+      text-align: center;
+      cursor: pointer;
+      background: #fff;
+    }
+
+    #drop.over {
+      background: #dff0f1;
+    }
+
+    #drop:focus-within {
+      outline: 3px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    #drop input {
+      position: absolute;
+      opacity: 0;
+      width: 1px;
+      height: 1px;
+    }
+
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: 20px 0;
+    }
+
+    li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 8px;
+    }
+
+    li span.name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    button {
+      font: inherit;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 6px;
+      padding: 4px 10px;
+      cursor: pointer;
+    }
+
+    button:focus-visible {
+      outline: 3px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    button.rm {
+      color: var(--danger);
+    }
+
+    #merge {
+      width: 100%;
+      padding: 12px;
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      font-weight: 600;
+      border-radius: 8px;
+    }
+
+    #merge:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+
+    #msg {
+      margin-top: 12px;
+      min-height: 1.5em;
+    }
+
+    #msg.error {
+      color: var(--danger);
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>Merge PDF</h1>
+    <p class="sub">Combine PDF files into one. Your files stay on your device.</p>
+
+    <label id="drop">
+      <input id="file" type="file" accept="application/pdf" multiple>
+      Drop PDF files here, or click to choose
+    </label>
+
+    <ul id="list"></ul>
+    <button id="merge" disabled>Merge PDFs</button>
+    <div id="msg" role="status"></div>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+  <script>
+    const { PDFDocument } = PDFLib;
+    const files = [];                       // the PDFs the user picked, in merge order
+    const list = document.getElementById('list');
+    const mergeBtn = document.getElementById('merge');
+    const msg = document.getElementById('msg');
+    const drop = document.getElementById('drop');
+    const input = document.getElementById('file');
+
+    function say(text, isError) { msg.textContent = text; msg.className = isError ? 'error' : ''; }
+
+    function addFiles(newFiles) {
+      for (const f of newFiles) {
+        if (f.type === 'application/pdf') files.push(f);
+      }
+      render();
+    }
+
+    function render() {
+      list.innerHTML = '';
+      files.forEach((f, i) => {
+        const li = document.createElement('li');
+        li.innerHTML = '<span class="name"></span>';
+        li.querySelector('.name').textContent = f.name;
+        const up = button('Up', () => move(i, -1), i === 0);
+        const down = button('Down', () => move(i, 1), i === files.length - 1);
+        const rm = button('Remove', () => { files.splice(i, 1); render(); }, false);
+        rm.classList.add('rm');
+        li.append(up, down, rm);
+        list.append(li);
+      });
+      mergeBtn.disabled = files.length < 2;
+      say(files.length === 1 ? 'Add at least one more PDF to merge.' : '');
+    }
+
+    function button(label, onClick, disabled) {
+      const b = document.createElement('button');
+      b.textContent = label; b.disabled = disabled; b.onclick = onClick;
+      return b;
+    }
+
+    function move(i, dir) {
+      [files[i], files[i + dir]] = [files[i + dir], files[i]];
+      render();
+    }
+
+    input.addEventListener('change', e => { addFiles(e.target.files); input.value = ''; });
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); addFiles(e.dataTransfer.files); });
+
+    mergeBtn.addEventListener('click', async () => {
+      mergeBtn.disabled = true;
+      say('Merging...');
+      try {
+        const merged = await PDFDocument.create();
+        for (const f of files) {
+          const src = await PDFDocument.load(await f.arrayBuffer());
+          const pages = await merged.copyPages(src, src.getPageIndices());
+          pages.forEach(p => merged.addPage(p));
+        }
+        const bytes = await merged.save();
+        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+        const a = document.createElement('a');
+        a.href = url; a.download = 'merged.pdf'; a.click();
+        URL.revokeObjectURL(url);
+        say('Done. Your merged.pdf has been downloaded.');
+      } catch (err) {
+        say('Could not merge. One of the files may be password-protected or damaged.', true);
+      }
+      mergeBtn.disabled = files.length < 2;
+    });
+  </script>
+</body>
+
+</html>
